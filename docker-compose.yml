@@ -1,0 +1,69 @@
+# OpenCode web UI (server + browser UI in one process).
+#
+# Host port/bind address (use `sudo env VAR=value docker compose ...` with sudo):
+#   OPENCODE_WEBUI_PORT       host port, default 4096
+#   OPENCODE_WEBUI_BIND_ADDR  host address, default 0.0.0.0 (all interfaces)
+
+x-oc-build: &oc-build
+  context: .
+  args:
+    OPENCODE_VERSION: ${OPENCODE_VERSION:-latest}
+
+services:
+  # One-shot: creates data dirs and hands /data and /workspace to UID/GID 1000.
+  volume-init:
+    build: *oc-build
+    image: persistent-opencode-webui:local
+    user: "0:0"
+    restart: "no"
+    command:
+      - bash
+      - -euc
+      - |
+        mkdir -p /data/home /data/config /data/share /data/state /data/cache /workspace
+        for dir in /data /data/home /data/config /data/share /data/state /data/cache /workspace; do
+          if [ "$$(stat -c %u:%g "$$dir")" != "1000:1000" ]; then
+            echo "Fixing ownership of $$dir"
+            chown -R 1000:1000 "$$dir"
+          fi
+        done
+    volumes:
+      - opencode-data:/data
+      - opencode-workspace:/workspace
+
+  opencode:
+    build: *oc-build
+    image: persistent-opencode-webui:local
+    command: ["opencode", "web", "--hostname", "0.0.0.0", "--port", "4096"]
+    init: true
+    restart: unless-stopped
+    user: "1000:1000"
+    depends_on:
+      volume-init:
+        condition: service_completed_successfully
+    environment:
+      HOME: /data/home
+      XDG_CONFIG_HOME: /data/config
+      XDG_DATA_HOME: /data/share
+      XDG_STATE_HOME: /data/state
+      XDG_CACHE_HOME: /data/cache
+      # Optional HTTP basic auth for the web UI/API:
+      OPENCODE_SERVER_PASSWORD: ${OPENCODE_SERVER_PASSWORD:-}
+      # Optional provider keys (or use `opencode auth login`, see README):
+      # ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      # OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+    ports:
+      - "${OPENCODE_WEBUI_BIND_ADDR:-0.0.0.0}:${OPENCODE_WEBUI_PORT:-4096}:4096"
+    volumes:
+      - opencode-data:/data
+      - opencode-workspace:/workspace
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s -o /dev/null http://127.0.0.1:4096/ || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+
+volumes:
+  opencode-data:
+  opencode-workspace:
