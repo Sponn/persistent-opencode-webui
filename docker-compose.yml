@@ -3,7 +3,9 @@
 # Host port/bind address (use `sudo env VAR=value docker compose ...` with sudo):
 #   OPENCODE_WEBUI_PORT       host port, default 4096
 #   OPENCODE_WEBUI_BIND_ADDR  host address, default 0.0.0.0 (all interfaces)
-#   OPENCODE_PRIVILEGED       run `opencode` privileged (needed for Podman), default true
+#   OPENCODE_PRIVILEGED       run `opencode` privileged (needed for Podman), default true.
+#                             Only toggles `privileged`; remove the other nesting options
+#                             on the `opencode` service to fully opt out.
 
 x-oc-build: &oc-build
   context: .
@@ -61,6 +63,7 @@ services:
       XDG_DATA_HOME: /data/share
       XDG_STATE_HOME: /data/state
       XDG_CACHE_HOME: /data/cache
+      # Stop Podman/Buildah re-executing into an extra user namespace when nested.
       _CONTAINERS_USERNS_CONFIGURED: ""
       CONTAINERS_STORAGE_CONF: /etc/containers/storage.conf
       # Optional HTTP basic auth for the web UI/API:

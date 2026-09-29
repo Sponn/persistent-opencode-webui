@@ -45,6 +45,7 @@ RUN set -eux; \
     touch /etc/containers/registries.conf; \
     grep -q '^unqualified-search-registries' /etc/containers/registries.conf \
       || echo 'unqualified-search-registries = ["docker.io"]' >> /etc/containers/registries.conf; \
+    # subuid/subgid (with uidmap/slirp4netns) allow rootless Podman if run as `node`.
     grep -q '^node:' /etc/subuid || echo 'node:100000:65536' >> /etc/subuid; \
     grep -q '^node:' /etc/subgid || echo 'node:100000:65536' >> /etc/subgid; \
     podman --version; buildah --version; skopeo --version
