@@ -37,7 +37,7 @@ services:
     command: ["opencode", "web", "--hostname", "0.0.0.0", "--port", "4096"]
     init: true
     restart: unless-stopped
-    user: "1000:1000"
+    user: "0:0"
     depends_on:
       volume-init:
         condition: service_completed_successfully
