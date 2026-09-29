@@ -7,12 +7,24 @@ Docker Compose setup for [OpenCode](https://opencode.ai) (`opencode web`). Setti
 | Service       | Purpose                                                                 |
 | ------------- | ----------------------------------------------------------------------- |
 | `volume-init` | One-shot (root): creates the data directories and fixes ownership, then exits with code `0`. |
-| `opencode`    | Web UI and API on container port `4096`, running as the non-root `node` user. |
+| `opencode`    | Web UI and API on container port `4096`, running as root inside the container so it can install packages and system tools when needed. |
 
 - Image: `node:22-bookworm-slim`.
-- Services run as the non-root `node` user (UID/GID `1000`).
+- The `opencode` service runs as root inside the container (`UID/GID 0`).
 - The web UI is published on **host port `4096`** by default.
 - The UI binds to **`0.0.0.0`** by default.
+
+## Security notice
+
+This setup intentionally gives the OpenCode agent root inside the container so it can install packages and use system-level tools. That is powerful and should be treated as privileged access.
+
+Before exposing this container to a network, make sure you do at least one of the following:
+
+- bind only to localhost or a trusted private network,
+- set a strong `OPENCODE_SERVER_PASSWORD`,
+- place it behind a VPN, firewall, or authenticated reverse proxy.
+
+Do not expose the web UI directly to the public internet without additional protection.
 
 ## Quick start
 
@@ -64,6 +76,20 @@ Do not commit secrets to `.env`.
 
 OpenCode lets anyone who can reach it run commands and edit files as the agent. It has no built-in login unless you set `OPENCODE_SERVER_PASSWORD`, so do not expose it directly to the public internet without a firewall or reverse proxy in front of it.
 
+## Installing packages / tools
+
+Because the agent runs as root inside the container, it can install packages with `apt`, `npm`, `pip`, or similar tools as part of its work.
+
+For one-off package installation inside the running container:
+
+```bash
+sudo docker compose exec -it opencode bash
+apt-get update
+apt-get install -y <package>
+```
+
+If you want a package to exist by default after a rebuild, add it to the `Dockerfile` and recreate the container.
+
 ## Provider login / API keys
 
 You can log in with the OpenCode CLI inside the container:
@@ -87,7 +113,7 @@ To put existing code into the workspace, you can either clone it from the OpenCo
 
 ```bash
 sudo docker compose cp ./myproject opencode:/workspace/myproject
-sudo docker compose exec -u 0 opencode chown -R 1000:1000 /workspace/myproject
+sudo docker compose exec -u 0 opencode chown -R 0:0 /workspace/myproject
 ```
 
 ## Updating
