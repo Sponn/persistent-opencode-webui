@@ -3,6 +3,9 @@
 # Host port/bind address (use `sudo env VAR=value docker compose ...` with sudo):
 #   OPENCODE_WEBUI_PORT       host port, default 4096
 #   OPENCODE_WEBUI_BIND_ADDR  host address, default 0.0.0.0 (all interfaces)
+#   OPENCODE_PRIVILEGED       run `opencode` privileged (needed for Podman), default true.
+#                             Only toggles `privileged`; remove the other nesting options
+#                             on the `opencode` service to fully opt out.
 
 x-oc-build: &oc-build
   context: .
@@ -11,6 +14,7 @@ x-oc-build: &oc-build
 
 services:
   # One-shot: creates data dirs and hands /data and /workspace to UID/GID 1000.
+  # Also creates the (root-owned) Podman image storage dir.
   volume-init:
     build: *oc-build
     image: persistent-opencode-webui:local
@@ -27,9 +31,11 @@ services:
             chown -R 1000:1000 "$$dir"
           fi
         done
+        mkdir -p /var/lib/containers/storage
     volumes:
       - opencode-data:/data
       - opencode-workspace:/workspace
+      - opencode-containers:/var/lib/containers
 
   opencode:
     build: *oc-build
@@ -38,6 +44,16 @@ services:
     init: true
     restart: unless-stopped
     user: "0:0"
+    # Nesting support so the agent can run Podman inside this container.
+    # This is close to host-level access; see "Security notice" in README.md.
+    privileged: ${OPENCODE_PRIVILEGED:-true}
+    security_opt:
+      - label=disable
+      - seccomp=unconfined
+      - apparmor=unconfined
+    devices:
+      - /dev/fuse
+    cgroup: host
     depends_on:
       volume-init:
         condition: service_completed_successfully
@@ -47,6 +63,9 @@ services:
       XDG_DATA_HOME: /data/share
       XDG_STATE_HOME: /data/state
       XDG_CACHE_HOME: /data/cache
+      # Stop Podman/Buildah re-executing into an extra user namespace when nested.
+      _CONTAINERS_USERNS_CONFIGURED: ""
+      CONTAINERS_STORAGE_CONF: /etc/containers/storage.conf
       # Optional HTTP basic auth for the web UI/API:
       OPENCODE_SERVER_PASSWORD: ${OPENCODE_SERVER_PASSWORD:-}
       # Optional provider keys (or use `opencode auth login`, see README):
@@ -57,6 +76,7 @@ services:
     volumes:
       - opencode-data:/data
       - opencode-workspace:/workspace
+      - opencode-containers:/var/lib/containers
     healthcheck:
       test: ["CMD-SHELL", "curl -s -o /dev/null http://127.0.0.1:4096/ || exit 1"]
       interval: 10s
@@ -67,3 +87,4 @@ services:
 volumes:
   opencode-data:
   opencode-workspace:
+  opencode-containers:
