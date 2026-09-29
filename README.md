@@ -11,6 +11,7 @@ Docker Compose setup for [OpenCode](https://opencode.ai) (`opencode web`). Setti
 
 - Image: `node:22-bookworm-slim`.
 - The `opencode` service runs as root inside the container (`UID/GID 0`).
+- The `opencode` service runs **privileged** so the agent can run containers with Podman (see below).
 - The web UI is published on **host port `4096`** by default.
 - The UI binds to **`0.0.0.0`** by default.
 
@@ -18,11 +19,17 @@ Docker Compose setup for [OpenCode](https://opencode.ai) (`opencode web`). Setti
 
 This setup intentionally gives the OpenCode agent root inside the container so it can install packages and use system-level tools. That is powerful and should be treated as privileged access.
 
+To let the agent run containers (Podman), the `opencode` container also runs with `privileged: true`, `seccomp=unconfined`, `apparmor=unconfined`, `label=disable`, the host cgroup namespace, and `/dev/fuse` exposed. **This is close to root access on the Docker host**: anyone who can use the web UI can likely take over the host. Treat access to the UI like SSH root access to the host.
+
+If you do not need containers inside the container, set `OPENCODE_PRIVILEGED=false` (for example in `.env`) to drop privileged mode. Podman will then not work, and you can also remove the other nesting options from `docker-compose.yml`.
+
 Before exposing this container to a network, make sure you do at least one of the following:
 
-- bind only to localhost or a trusted private network,
+- bind only to localhost or a trusted private network/VPN (for example `OPENCODE_WEBUI_BIND_ADDR=127.0.0.1`),
 - set a strong `OPENCODE_SERVER_PASSWORD`,
 - place it behind a VPN, firewall, or authenticated reverse proxy.
+
+Doing both (localhost/VPN binding **and** a strong password) is strongly recommended.
 
 Do not expose the web UI directly to the public internet without additional protection.
 
@@ -68,6 +75,7 @@ OPENCODE_WEBUI_PORT=4096
 # OPENCODE_WEBUI_BIND_ADDR=0.0.0.0
 # OPENCODE_VERSION=latest
 # OPENCODE_SERVER_PASSWORD=change-me
+# OPENCODE_PRIVILEGED=true
 ```
 
 Do not commit secrets to `.env`.
@@ -90,6 +98,29 @@ apt-get install -y <package>
 
 If you want a package to exist by default after a rebuild, add it to the `Dockerfile` and recreate the container.
 
+## Running containers inside the container (Podman)
+
+Podman, Buildah, and Skopeo are preinstalled, so the agent can run `podman build` / `podman run` (Docker is not installed; `podman` accepts the same commands). Podman runs rootful (the agent is root in the container) with the `crun` runtime, `cgroupfs` cgroup manager, and the `overlay` storage driver via `fuse-overlayfs`. Short image names such as `alpine` resolve via `docker.io`.
+
+Smoke test:
+
+```bash
+sudo docker compose exec -it opencode podman info
+sudo docker compose exec -it opencode podman run --rm docker.io/library/alpine echo ok
+```
+
+The second command should print `ok`.
+
+Image layers and containers are stored in the `opencode-containers` volume (`/var/lib/containers`), so pulled and built images survive restarts and rebuilds.
+
+Host requirements:
+
+- `/dev/fuse` must exist on the Docker host (`ls -l /dev/fuse`; load it with `sudo modprobe fuse` if missing).
+- Tested with cgroup v2 (`stat -fc %T /sys/fs/cgroup` prints `cgroup2fs`).
+- The Docker engine must allow privileged containers (rootless Docker or restricted runtimes may not).
+
+If nested containers cannot reach the network on your host, try `podman run --network host ...`. As a last resort, add `netns = "host"` under a `[containers]` section in `/etc/containers/containers.conf` (in the `Dockerfile`) to make that the default.
+
 ## Provider login / API keys
 
 You can log in with the OpenCode CLI inside the container:
@@ -106,6 +137,7 @@ Credentials go under the persistent `/data` volume. You can also set API key env
 | -------------------- | ------------ | -------- |
 | `opencode-data`      | `/data`      | HOME, config, state, cache, auth, and session data |
 | `opencode-workspace` | `/workspace` | Your project files |
+| `opencode-containers` | `/var/lib/containers` | Podman images, layers, and containers |
 
 The volumes survive restarts, rebuilds, and `docker compose down`. **Do not run `docker compose down -v`**, because that deletes them.
 
